@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Text Cleaner</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 12px; }
+    h1 { font-size: 18px; margin: 8px 0 12px; }
+    textarea { width: 100%; min-height: 220px; }
+    .row { margin: 10px 0; }
+    button { padding: 10px 14px; border-radius: 8px; border: 1px solid #ccc; }
+    .muted { color: #666; font-size: 12px; }
+
+    /* Output khusus agar seleksi hanya di sini */
+    #outContainer {
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 8px;
+      min-height: 180px;
+      background: #fafafa;
+    }
+    #out {
+      white-space: pre-wrap;
+      user-select: text;
+      -webkit-user-select: text;
+    }
+  </style>
+</head>
+<body>
+  <h1>Text Cleaner</h1>
+
+  <div class="row">
+    <label for="inp"><b>Input (≤ 3000 kata)</b></label><br/>
+    <textarea id="inp" placeholder="Tempel teks di sini..."></textarea>
+    <div class="muted" id="wc">0 kata</div>
+  </div>
+
+  <div class="row">
+    <button id="btn">Proses</button>
+    <button id="btnCopy" type="button">Copy Output</button>
+    <button id="btnSelect" type="button">Select Output</button>
+    <span id="status" class="muted"></span>
+  </div>
+
+  <div class="row">
+    <label><b>Output</b></label>
+    <div id="outContainer"><div id="out"></div></div>
+  </div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const inp = $("inp");
+  const out = $("out");
+  const status = $("status");
+  const wc = $("wc");
+
+  function normalizeQuotes(text) {
+    return text
+      .replace(/[“”«»]/g, '"')
+      .replace(/[‘’‚‛]/g, "'");
+  }
+
+  function removeMultipleEmptyLines(text) {
+    // Ganti 3+ baris kosong jadi maksimal 2
+    return text.replace(/\n{3,}/g, "\n\n");
+  }
+
+  function trimTrailingSpaces(text) {
+    return text.replace(/[ \t]+$/gm, "");
+  }
+
+  function normalizeSpaces(text) {
+    return text.replace(/\u00A0/g, " "); // non-breaking space -> space biasa
+  }
+
+  function countWords(text) {
+    const cleaned = text.trim().replace(/\s+/g, " ");
+    if (!cleaned) return 0;
+    return cleaned.split(" ").length;
+  }
+
+  function processText(text) {
+    let t = text;
+
+    // 1) Normalisasi spasi & karakter
+    t = normalizeSpaces(t);
+    t = normalizeQuotes(t);
+
+    // 2) Hapus spasi di akhir baris
+    t = trimTrailingSpaces(t);
+
+    // 3) Hapus baris kosong berlebihan
+    t = removeMultipleEmptyLines(t);
+
+    // 4) Trim awal & akhir
+    t = t.trim();
+
+    return t;
+  }
+
+  inp.addEventListener("input", () => {
+    const words = countWords(inp.value);
+    wc.textContent = words + " kata";
+  });
+
+  $("btn").addEventListener("click", () => {
+    const words = countWords(inp.value);
+    if (words > 3000) {
+      status.textContent = `Input ~${words} kata. Batas 3000.`;
+      return;
+    }
+    out.textContent = processText(inp.value);
+    status.textContent = "Selesai.";
+  });
+
+  // Fallback copy yang kompatibel di HTTPS / file / content
+  async function copyOutput() {
+    const text = out.textContent || "";
+    if (!text) {
+      status.textContent = "Output kosong.";
+      return;
+    }
+
+    // 1) Clipboard API (berfungsi di GitHub Pages karena HTTPS)
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        status.textContent = "Output disalin (clipboard API).";
+        return;
+      }
+      throw new Error("Not secure context");
+    } catch (_) {}
+
+    // 2) Fallback: hidden textarea + execCommand('copy')
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "absolute";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      status.textContent = ok ? "Output disalin (fallback)." : "Gagal menyalin.";
+    } catch (e) {
+      status.textContent = "Gagal menyalin.";
+    }
+  }
+
+  $("btnCopy").addEventListener("click", copyOutput);
+
+  $("btnSelect").addEventListener("click", () => {
+    const range = document.createRange();
+    range.selectNodeContents(out);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    status.textContent = "Output dipilih. Tap 'Copy' di toolbar.";
+  });
+
+  // Optional: tap sekali pada area output -> auto select konten
+  $("out").addEventListener("click", () => {
+    const range = document.createRange();
+    range.selectNodeContents(out);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  });
+</script>
+</body>
+</html>
