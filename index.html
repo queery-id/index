@@ -7,24 +7,18 @@
 <style>
   body { font-family: system-ui, Arial, sans-serif; margin: 12px; }
   h1 { font-size: 18px; margin: 8px 0 12px; }
-  textarea { width: 100%; min-height: 220px; }
+  textarea { width: 100%; min-height: 240px; }
   .row { margin: 10px 0; }
   button { padding: 10px 14px; border-radius: 8px; border: 1px solid #ccc; }
   .muted { color: #666; font-size: 12px; }
-
-  /* Output khusus agar seleksi hanya di sini */
   #outContainer {
     border: 1px solid #ddd;
     border-radius: 6px;
-    padding: 8px;
+    padding: 10px;
     min-height: 180px;
     background: #fafafa;
   }
-  #out {
-    white-space: pre-wrap;
-    user-select: text;
-    -webkit-user-select: text;
-  }
+  #out { white-space: pre-wrap; user-select: text; -webkit-user-select: text; }
 </style>
 </head>
 <body>
@@ -40,6 +34,7 @@
     <button id="btn">Proses</button>
     <button id="btnCopy" type="button">Copy Output</button>
     <button id="btnSelect" type="button">Select Output</button>
+    <button id="btnClear" type="button">Clear</button>
     <span id="status" class="muted"></span>
   </div>
 
@@ -53,40 +48,87 @@
   const inp = $("inp"), out = $("out"), wc = $("wc"), status = $("status");
 
   function countWords(s){
-    const m=(s||"").trim().match(/\S+/g);
+    const m = (s || "").trim().match(/\S+/g);
     return m ? m.length : 0;
   }
-
   function updateCounter(){
     wc.textContent = countWords(inp.value) + " kata";
   }
   inp.addEventListener("input", updateCounter);
   updateCounter();
 
+  // =========================================================
+  //  WA ANDROID SAFE — setara dengan FormatText.py
+  // =========================================================
   function processText(text){
     let o = text || "";
 
-    // ===== Bagian pembersihan persis seperti versi offline =====
-    // Hilangkan heading markdown (#, ##, ### di awal baris)
-    o = o.replace(/^#{1,5}\s+/gm, "");
+    // --- 1) Bersihkan heading markdown (#####, ####, ###, ##, #)
+    o = o.replace(/^#####\s+/gm, "");
+    o = o.replace(/^####\s+/gm, "");
+    o = o.replace(/^###\s+/gm, "");
+    o = o.replace(/^##\s+/gm, "");
+    o = o.replace(/^#\s+/gm, "");
 
-    // Ganti *** dan ** jadi * (supaya italic/bold markdown jadi 1 tanda saja)
+    // --- 2) Bold markdown ke format WA (*** / ** -> *)
     o = o.replace(/\*\*\*/g, "*");
     o = o.replace(/\*\*/g, "*");
 
-    // Ganti garis pemisah '---' di satu baris menjadi '_____'
-    o = o.replace(/^\s*---\s*$(\r?\n)?/gm, "\n_____\n\n");
+    // --- 3) Garis pemisah --- jadi _____ + kasih 1 baris kosong
+    // Python: r'^\s*---\s*$' -> '_____\n'
+    // HTML: kita bikin konsisten: "_____" + newline
+    o = o.replace(/^\s*---\s*$/gm, "_____\n");
 
-    // Ganti dash panjang / strip di tengah kalimat jadi koma
-    o = o.replace(/—/g, ", ");
-    o = o.replace(/ - /g, ", ");
-
-    // Hilangkan backslash yang tidak perlu
-    o = o.replace(/\\\$/g, "$");  // \$  -> $
-    o = o.replace(/\\/g, "");     // sisa backslash lain dibuang
-
-    // Batasi baris kosong maksimum 2
+    // --- 4) Hapus baris kosong berlebih (lebih dari 1 baris kosong)
+    // Python: ((\r?\n)[ \t]*){3,} -> \n\n
     o = o.replace(/((\r?\n)[ \t]*){3,}/g, "\n\n");
+
+    // --- 5) Hapus utm_source=chatgpt.com (dan utm_* lain kalau ada)
+    // khusus ?utm_source=chatgpt.com
+    o = o.replace(/\?utm_source=chatgpt\.com(?=[\s"'()\]]|$)/g, "");
+    o = o.replace(/&utm_source=chatgpt\.com(?=[\s"'()\]]|$)/g, "");
+
+    // umum utm_* (lebih aman)
+    // - hapus utm_* di query (awal / tengah)
+    o = o.replace(/(\?|&)(utm_[^=]+=[^&#\s"]+)/g, "");
+    // - rapihkan sisa query: '?&' -> '?', '&&' -> '&'
+    o = o.replace(/\?&/g, "?");
+    o = o.replace(/&&/g, "&");
+    // - hapus '?' atau '&' yang menggantung di akhir
+    o = o.replace(/(\?|&)(?=[\s"'()\]]|$)/g, "");
+
+    // =========================
+    //  BAGIAN UTAMA: URL LIST WA
+    // =========================
+
+    // A) [1] [https://xxx](https://xxx)  -->  [1] https://xxx
+    o = o.replace(
+      /^\s*(\[\d+\])\s*\[(https?:\/\/[^\]\s]+)\]\(\2\)\s*$/gm,
+      "$1 $2"
+    );
+
+    // B) [1] [https://xxx]  -->  [1] https://xxx
+    o = o.replace(
+      /^\s*(\[\d+\])\s*\[(https?:\/\/[^\]\s]+)\]\s*$/gm,
+      "$1 $2"
+    );
+
+    // C) [1]: https://xxx "judul"  -->  [1] https://xxx
+    o = o.replace(
+      /^\s*\[(\d+)\]:\s*(https?:\/\/\S+)(?:\s+"[^"]*")?\s*$/gm,
+      "[$1] $2"
+    );
+
+    // D) Pastikan antar item [n] ada 1 baris kosong
+    // Python pakai lookahead baris berikut [n] https://
+    o = o.replace(
+      /^(\s*\[\d+\].*)(\r?\n)(?=\s*\[\d+\]\s+https?:\/\/)/gm,
+      "$1$2$2"
+    );
+
+    // --- tambahan kecil: bersihkan backslash sisa formatting
+    o = o.replace(/\\\$/g, "$");
+    o = o.replace(/\\/g, "");
 
     return o;
   }
@@ -101,25 +143,26 @@
     status.textContent = "Selesai.";
   });
 
-  // Copy yang kompatibel di HTTPS (GitHub Pages) + fallback
+  $("btnClear").addEventListener("click", ()=>{
+    inp.value = "";
+    out.textContent = "";
+    updateCounter();
+    status.textContent = "";
+  });
+
   async function copyOutput() {
     const text = out.textContent || "";
-    if (!text) {
-      status.textContent = "Output kosong.";
-      return;
-    }
+    if (!text) { status.textContent = "Output kosong."; return; }
 
-    // 1) Clipboard API (berfungsi di GitHub Pages karena HTTPS)
     try {
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text);
-        status.textContent = "Output disalin (clipboard API).";
+        status.textContent = "Output disalin.";
         return;
       }
-      throw new Error("Not secure context");
+      throw new Error("no clipboard api");
     } catch (_) {}
 
-    // 2) Fallback: hidden textarea + execCommand('copy')
     try {
       const ta = document.createElement("textarea");
       ta.value = text;
@@ -130,7 +173,7 @@
       ta.select();
       const ok = document.execCommand("copy");
       document.body.removeChild(ta);
-      status.textContent = ok ? "Output disalin (fallback)." : "Gagal menyalin.";
+      status.textContent = ok ? "Output disalin." : "Gagal menyalin.";
     } catch (e) {
       status.textContent = "Gagal menyalin.";
     }
@@ -138,7 +181,6 @@
 
   $("btnCopy").addEventListener("click", copyOutput);
 
-  // Convenience: select only the output area
   $("btnSelect").addEventListener("click", ()=>{
     const range = document.createRange();
     range.selectNodeContents(out);
@@ -148,7 +190,6 @@
     status.textContent = "Output dipilih. Tap 'Copy' di toolbar.";
   });
 
-  // Optional: tap sekali pada area output -> auto select konten
   $("out").addEventListener("click", ()=>{
     const range = document.createRange();
     range.selectNodeContents(out);
