@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Text Cleaner</title>
+<style>
+  body { font-family: system-ui, Arial, sans-serif; margin: 12px; }
+  h1 { font-size: 18px; margin: 8px 0 12px; }
+  textarea { width: 100%; min-height: 240px; }
+  .row { margin: 10px 0; }
+  button { padding: 10px 14px; border-radius: 8px; border: 1px solid #ccc; }
+  .muted { color: #666; font-size: 12px; }
+  #outContainer {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 10px;
+    min-height: 180px;
+    background: #fafafa;
+  }
+  #out { white-space: pre-wrap; user-select: text; -webkit-user-select: text; }
+</style>
+</head>
+<body>
+  <h1>Text Cleaner</h1>
+
+  <div class="row">
+    <label for="inp"><b>Input (≤ 3000 kata)</b></label><br/>
+    <textarea id="inp" placeholder="Tempel teks di sini..."></textarea>
+    <div class="muted" id="wc">0 kata</div>
+  </div>
+
+  <div class="row">
+    <button id="btn">Proses</button>
+    <button id="btnCopy" type="button">Copy Output</button>
+    <button id="btnSelect" type="button">Select Output</button>
+    <button id="btnClear" type="button">Clear</button>
+    <span id="status" class="muted"></span>
+  </div>
+
+  <div class="row">
+    <label><b>Output</b></label>
+    <div id="outContainer"><div id="out"></div></div>
+  </div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const inp = $("inp"), out = $("out"), wc = $("wc"), status = $("status");
+
+  function countWords(s){
+    const m = (s || "").trim().match(/\S+/g);
+    return m ? m.length : 0;
+  }
+  function updateCounter(){
+    wc.textContent = countWords(inp.value) + " kata";
+  }
+  inp.addEventListener("input", updateCounter);
+  updateCounter();
+
+  // =========================================================
+  //  WA ANDROID SAFE — setara dengan FormatText.py
+  // =========================================================
+  function processText(text){
+    let o = text || "";
+
+    // --- 1) Bersihkan heading markdown (#####, ####, ###, ##, #)
+    o = o.replace(/^#####\s+/gm, "");
+    o = o.replace(/^####\s+/gm, "");
+    o = o.replace(/^###\s+/gm, "");
+    o = o.replace(/^##\s+/gm, "");
+    o = o.replace(/^#\s+/gm, "");
+
+    // --- 2) Bold markdown ke format WA (*** / ** -> *)
+    o = o.replace(/\*\*\*/g, "*");
+    o = o.replace(/\*\*/g, "*");
+
+    // --- 3) Garis pemisah --- jadi _____ + kasih 1 baris kosong
+    // Python: r'^\s*---\s*$' -> '_____\n'
+    // HTML: kita bikin konsisten: "_____" + newline
+    o = o.replace(/^\s*---\s*$/gm, "_____\n");
+
+    // --- 4) Hapus baris kosong berlebih (lebih dari 1 baris kosong)
+    // Python: ((\r?\n)[ \t]*){3,} -> \n\n
+    o = o.replace(/((\r?\n)[ \t]*){3,}/g, "\n\n");
+
+    // --- 5) Hapus utm_source=chatgpt.com (dan utm_* lain kalau ada)
+    // khusus ?utm_source=chatgpt.com
+    o = o.replace(/\?utm_source=chatgpt\.com(?=[\s"'()\]]|$)/g, "");
+    o = o.replace(/&utm_source=chatgpt\.com(?=[\s"'()\]]|$)/g, "");
+
+    // umum utm_* (lebih aman)
+    // - hapus utm_* di query (awal / tengah)
+    o = o.replace(/(\?|&)(utm_[^=]+=[^&#\s"]+)/g, "");
+    // - rapihkan sisa query: '?&' -> '?', '&&' -> '&'
+    o = o.replace(/\?&/g, "?");
+    o = o.replace(/&&/g, "&");
+    // - hapus '?' atau '&' yang menggantung di akhir
+    o = o.replace(/(\?|&)(?=[\s"'()\]]|$)/g, "");
+
+    // =========================
+    //  BAGIAN UTAMA: URL LIST WA
+    // =========================
+
+    // A) [1] [https://xxx](https://xxx)  -->  [1] https://xxx
+    o = o.replace(
+      /^\s*(\[\d+\])\s*\[(https?:\/\/[^\]\s]+)\]\(\2\)\s*$/gm,
+      "$1 $2"
+    );
+
+    // B) [1] [https://xxx]  -->  [1] https://xxx
+    o = o.replace(
+      /^\s*(\[\d+\])\s*\[(https?:\/\/[^\]\s]+)\]\s*$/gm,
+      "$1 $2"
+    );
+
+    // C) [1]: https://xxx "judul"  -->  [1] https://xxx
+    o = o.replace(
+      /^\s*\[(\d+)\]:\s*(https?:\/\/\S+)(?:\s+"[^"]*")?\s*$/gm,
+      "[$1] $2"
+    );
+
+    // D) Pastikan antar item [n] ada 1 baris kosong
+    // Python pakai lookahead baris berikut [n] https://
+    o = o.replace(
+      /^(\s*\[\d+\].*)(\r?\n)(?=\s*\[\d+\]\s+https?:\/\/)/gm,
+      "$1$2$2"
+    );
+
+    // --- tambahan kecil: bersihkan backslash sisa formatting
+    o = o.replace(/\\\$/g, "$");
+    o = o.replace(/\\/g, "");
+
+    return o;
+  }
+
+  $("btn").addEventListener("click", ()=>{
+    const words = countWords(inp.value);
+    if (words > 3000) {
+      status.textContent = `Input ~${words} kata. Batas 3000.`;
+      return;
+    }
+    out.textContent = processText(inp.value);
+    status.textContent = "Selesai.";
+  });
+
+  $("btnClear").addEventListener("click", ()=>{
+    inp.value = "";
+    out.textContent = "";
+    updateCounter();
+    status.textContent = "";
+  });
+
+  async function copyOutput() {
+    const text = out.textContent || "";
+    if (!text) { status.textContent = "Output kosong."; return; }
+
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        status.textContent = "Output disalin.";
+        return;
+      }
+      throw new Error("no clipboard api");
+    } catch (_) {}
+
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "absolute";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      status.textContent = ok ? "Output disalin." : "Gagal menyalin.";
+    } catch (e) {
+      status.textContent = "Gagal menyalin.";
+    }
+  }
+
+  $("btnCopy").addEventListener("click", copyOutput);
+
+  $("btnSelect").addEventListener("click", ()=>{
+    const range = document.createRange();
+    range.selectNodeContents(out);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    status.textContent = "Output dipilih. Tap 'Copy' di toolbar.";
+  });
+
+  $("out").addEventListener("click", ()=>{
+    const range = document.createRange();
+    range.selectNodeContents(out);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  });
+</script>
+</body>
+</html>
